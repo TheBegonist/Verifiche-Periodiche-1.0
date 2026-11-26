@@ -1,8 +1,8 @@
 /* Verifiche periodiche: tiene l'app nel telefono, cosi' si apre anche senza rete.
    Cambiare VERSIONE quando si pubblica una nuova versione dei file. */
-const VERSIONE = 'vp-1.6';
+const VERSIONE = 'vp-1.7';
 const OCR = 'vp-ocr-7.0.0';   // motore di lettura: cambia solo con una nuova versione di Tesseract
-const FILE = ['./', 'index.html', 'app.js', 'estrai.js', 'lettura.js', 'scheda.js', 'manifest.webmanifest', 'icona-192.png', 'icona-512.png'];
+const FILE = ['./', 'index.html', 'app.js', 'estrai.js', 'lettura.js', 'scheda.js', 'taratura.js', 'manifest.webmanifest', 'icona-192.png', 'icona-512.png'];
 
 self.addEventListener('install', ev => {
   // cache 'reload': i file della versione nuova presi dal sito, non le copie vecchie nella cache del browser

@@ -4,7 +4,7 @@
    il file da importare in Access. L'elenco di ditte e apparecchi arriva da Access
    (Menu > "Elenco per il telefono"). */
 
-const VERSIONE_APP = '1.6';
+const VERSIONE_APP = '1.7';
 const FORMATO_INVIO = 1;
 
 // ---------------------------------------------------------------- utilita'
@@ -273,7 +273,7 @@ function erroriVerifica(r) {
   }
   return e;
 }
-const errori = r => (r.tipo === 'VE' ? erroriVerifica(r) : r.tipo === 'AP' ? erroriApparecchio(r) : erroriDitta(r));
+const errori = r => (r.tipo === 'VE' ? erroriVerifica(r) : r.tipo === 'AP' ? erroriApparecchio(r) : r.tipo === 'TA' ? erroriTaratura(r) : erroriDitta(r));
 
 // ---------------------------------------------------------------- record
 async function salvaRecord(r) {
@@ -302,6 +302,7 @@ function descrivi(r) {
     return { titolo: `${a ? a.mat : '?'} – ${z ? z.rs : '?'}`,
              sotto: `Verifica ${a ? a.fam.toLowerCase() : ''} del ${fmtData(r.d.data)}` };
   }
+  if (r.tipo === 'TA') return descriviTaratura(r);
   if (r.tipo === 'AP') {
     const z = ditta(r.d.az);
     return { titolo: `Apparecchio nuovo: ${r.d.mat || '(senza matricola)'}`, sotto: `${r.d.fam} – ${z ? z.rs : 'ditta da scegliere'}` };
@@ -466,7 +467,7 @@ async function segnaPronta(r) {
     const z = a ? ditta(a.az) : null;
     if (z && z.nuova && z.rec && z.rec.stato === 'bozza') { z.rec.stato = 'pronta'; await salvaRecord(z.rec); }
   }
-  if (r.tipo === 'AP') {
+  if (r.tipo === 'AP' || r.tipo === 'TA') {
     const z = ditta(r.d.az);
     if (z && z.nuova && z.rec && z.rec.stato === 'bozza') { z.rec.stato = 'pronta'; await salvaRecord(z.rec); }
   }
@@ -551,20 +552,22 @@ VISTE.home = async main => {
   const usati = new Set();
   for (const r of rec) {
     if (r.tipo === 'VE' && String(r.d.app).startsWith('N:')) usati.add(r.d.app.slice(2));
-    if (r.tipo === 'AP' && String(r.d.az).startsWith('N:')) usati.add(r.d.az.slice(2));
+    if ((r.tipo === 'AP' || r.tipo === 'TA') && String(r.d.az).startsWith('N:')) usati.add(r.d.az.slice(2));
   }
-  const visibile = r => r.tipo === 'VE' || !usati.has(r.uuid);
+  const visibile = r => r.tipo === 'VE' || r.tipo === 'TA' || !usati.has(r.uuid);
   const aperti = rec.filter(r => (r.stato === 'bozza' || r.stato === 'pronta') && visibile(r)).sort((a, b) => b.modificato - a.modificato);
   const pronte = rec.filter(r => r.stato === 'pronta' && visibile(r));
   const inviate = rec.filter(r => (r.stato === 'inviata' || r.stato === 'importata') && visibile(r));
   const nVe = pronte.filter(r => r.tipo === 'VE').length;
-  const nAltro = pronte.length - nVe;
+  const nTa = pronte.filter(r => r.tipo === 'TA').length;
+  const nAltro = pronte.length - nVe - nTa;
   const testoInvio = !pronte.length ? 'Invia al PC'
-    : `Invia al PC (${[nVe ? `${nVe} ${nVe === 1 ? 'verifica' : 'verifiche'}` : '', nAltro ? `${nAltro} ${nAltro === 1 ? 'scheda' : 'schede'}` : '']
-        .filter(Boolean).join(' e ')})`;
+    : `Invia al PC (${[nVe ? `${nVe} ${nVe === 1 ? 'verifica' : 'verifiche'}` : '', nTa ? `${nTa} ${nTa === 1 ? 'taratura' : 'tarature'}` : '',
+        nAltro ? `${nAltro} ${nAltro === 1 ? 'scheda' : 'schede'}` : ''].filter(Boolean).join(', ')})`;
 
   main.append(
     h('button', { class: 'btn', onclick: () => vai('famiglia') }, 'Nuova verifica'),
+    h('button', { class: 'btn secondario', onclick: nuovaTaratura }, 'Taratura valvole al banco'),
     h('h2', {}, 'Sul telefono'),
     aperti.length ? aperti.map(r => {
       const x = descrivi(r);
@@ -582,6 +585,7 @@ VISTE.home = async main => {
 };
 function apri(r) {
   if (r.tipo === 'VE') vai('verifica', r.uuid);
+  else if (r.tipo === 'TA') vai('taratura', r.uuid);
   else if (r.tipo === 'AP') vai('apparecchio', { uuid: r.uuid });
   else vai('ditta', { uuid: r.uuid });
 }
@@ -971,8 +975,8 @@ VISTE.ditta = async (main, arg) => {
     etichetta(d.tipo === 'Condominio' ? 'Amministratore' : 'Referente', campoTesto(d, 'ref', salva, op)),
     h('h2', {}, 'Stato'), mancanze.box, segno,
     blocca ? null : h('button', { class: 'btn pericolo', onclick: async () => {
-      const usata = [...R.values()].some(x => x.tipo === 'AP' && x.d.az === 'N:' + r.uuid);
-      if (usata) { await messaggio('Non si può eliminare', 'La ditta è usata da un apparecchio nuovo: cambia prima la ditta dell\'apparecchio.'); return; }
+      const usata = [...R.values()].some(x => (x.tipo === 'AP' || x.tipo === 'TA') && x.d.az === 'N:' + r.uuid);
+      if (usata) { await messaggio('Non si può eliminare', 'La ditta è usata da un apparecchio nuovo o da una taratura: cambia prima la ditta.'); return; }
       if (await conferma('Eliminare la ditta nuova?', 'I dati vengono cancellati dal telefono.', 'Elimina', 'No', true)) { await eliminaRecord(r); indietro(); }
     } }, 'Elimina questa ditta'));
   if (!blocca) barra(h('button', { class: 'btn', onclick: () => indietro() }, 'Fatto'));
@@ -1030,7 +1034,7 @@ function blobBase64(b) {
 async function preparaInvio(anche) {
   const stati = new Set(['pronta', ...(anche ? ['inviata'] : [])]);
   const scelti = [...R.values()].filter(r => stati.has(r.stato));
-  const AZ = new Map(), AP = new Map(), VE = [];
+  const AZ = new Map(), AP = new Map(), VE = [], TA = [];
   const problemi = [];
   const aggAz = ref => { if (ref && ref.startsWith('N:')) { const z = R.get(ref.slice(2)); if (z) AZ.set(z.uuid, z); } };
   const aggAp = ref => { if (ref && ref.startsWith('N:')) { const x = R.get(ref.slice(2)); if (x) { AP.set(x.uuid, x); aggAz(x.d.az); } } };
@@ -1040,6 +1044,7 @@ async function preparaInvio(anche) {
     if (r.tipo === 'VE') { VE.push(r); aggAp(r.d.app); }
     if (r.tipo === 'AP') { AP.set(r.uuid, r); aggAz(r.d.az); }
     if (r.tipo === 'AZ') AZ.set(r.uuid, r);
+    if (r.tipo === 'TA') { TA.push(r); aggAz(r.d.az); for (const v of r.d.valvole || []) aggAp(v.app); }
   }
   const ref = x => (x ? x : '');
   const L = [`VPINVIO\t${FORMATO_INVIO}\t${esc(IMP.telefono || 'telefono')}\t${adesso()}\t${VERSIONE_APP}`];
@@ -1074,6 +1079,8 @@ async function preparaInvio(anche) {
       pres ? d.mt || '' : '', pres ? d.sp || '' : '', pres ? d.ve || '' : '',
       pres ? rilieviInvio(d, 'fs') : '', pres ? rilieviInvio(d, 'fd') : '', pres ? rilieviInvio(d, 'fa') : '']));
   }
+  TA.sort((a, b) => String(a.d.data).localeCompare(String(b.d.data)));
+  for (const t of TA) L.push(...righeTaratura(t));
   let nFoto = 0;
   const conFoto = [...AP.values(), ...VE];
   for (const r of conFoto) {
@@ -1087,7 +1094,7 @@ async function preparaInvio(anche) {
   }
   const nDati = L.length - 1 - Object.keys(CAMPI).length;
   L.push(`FINE\t${nDati}`);
-  return { testo: L.join('\r\n') + '\r\n', inclusi: [...AZ.values(), ...AP.values(), ...VE], VE, AP, AZ, nFoto, problemi };
+  return { testo: L.join('\r\n') + '\r\n', inclusi: [...AZ.values(), ...AP.values(), ...VE, ...TA], VE, TA, AP, AZ, nFoto, problemi };
 }
 
 VISTE.invio = async (main, anche) => {
@@ -1104,7 +1111,8 @@ VISTE.invio = async (main, anche) => {
   const file = new File([p.testo], nome, { type: 'text/plain' });
   main.append(
     h('div', { class: 'scheda' },
-      h('div', {}, h('span', { class: 'conteggio' }, p.VE.length), ` ${p.VE.length === 1 ? 'verifica' : 'verifiche'}`),
+      p.VE.length || !p.TA.length ? h('div', {}, h('span', { class: 'conteggio' }, p.VE.length), ` ${p.VE.length === 1 ? 'verifica' : 'verifiche'}`) : null,
+      p.TA.length ? h('div', {}, h('span', { class: 'conteggio' }, p.TA.length), ` ${p.TA.length === 1 ? 'taratura di valvole' : 'tarature di valvole'}`) : null,
       p.AP.size ? h('div', {}, `${p.AP.size} ${p.AP.size === 1 ? 'apparecchio nuovo' : 'apparecchi nuovi'}`) : null,
       p.AZ.size ? h('div', {}, `${p.AZ.size} ${p.AZ.size === 1 ? 'ditta nuova' : 'ditte nuove'}`) : null,
       h('div', { class: 'nota' }, `${p.nFoto} foto · file ${nome} (${kb > 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb + ' KB'})`)),
